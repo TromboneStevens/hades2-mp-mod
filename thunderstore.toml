@@ -4,7 +4,7 @@ schemaVersion = "0.0.1"
 
 [package]
 namespace = "TromboneStevens"
-name = "Hades II Co-Op"
+name = "Hades2MP"
 versionNumber = "0.0.1"
 description = "A multiplayer co-op mod for Hades II."
 websiteUrl = "https://github.com/TromboneStevens/hades2-mp-mod"
@@ -23,10 +23,6 @@ SGG_Modding-ModUtil = "4.0.1"
 icon = "./icon.png"
 readme = "./README.md"
 outdir = "./build"
-
-[[build.copy]]
-source = "./CHANGELOG.md"
-target = "./CHANGELOG.md"
 
 [[build.copy]]
 source = "./LICENSE"
