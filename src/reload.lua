@@ -24,13 +24,3 @@ end
 function trigger_Gift()
 	modutil.mod.Hades.PrintOverhead(config.message)
 end
-
-
--------------------------------------------------------------------
--- This function is part of the mod creation guide from the wiki --
--------------------------------------------------------------------
-function mod.LoadSkellyPackage()
-	local packageName = _PLUGIN.guid .. "Portraits"
-	print("AuthorName-ModName - Loading package: " .. packageName)
-	LoadPackages({ Name = packageName })
-end
