@@ -7,7 +7,7 @@ namespace = "TromboneStevens"
 name = "Hades II Co-Op"
 versionNumber = "0.0.1"
 description = "A multiplayer co-op mod for Hades II."
-websiteUrl = "https://github.com/AuthorName/ModName"
+websiteUrl = "https://github.com/TromboneStevens/hades2-mp-mod"
 containsNsfwContent = false
 
 [package.dependencies]
