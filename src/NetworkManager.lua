@@ -1,18 +1,11 @@
 -- src/NetworkManager.lua
 return function()
-    -- Load LuaSocket
     local socket = require("socket") 
-
-    if not socket then
-        print("[NetworkManager] CRITICAL: Failed to load 'socket' library")
-        return nil
-    end
+    if not socket then return nil end
 
     local NetworkManager = {}
     NetworkManager.udp = nil
-    NetworkManager.mode = nil -- Track if we are "host" or "client"
-    
-    -- For Host: Keep track of the last person who talked to us so we can reply
+    NetworkManager.mode = nil
     NetworkManager.last_client_ip = nil
     NetworkManager.last_client_port = nil
 
@@ -20,41 +13,32 @@ return function()
         NetworkManager.mode = mode
         NetworkManager.udp = socket.udp()
         
-        -- Set timeout to 0 for non-blocking behavior
+        -- Force Non-Blocking
         NetworkManager.udp:settimeout(0)
 
         if mode == "host" then
-            -- Host: Binds to port, stays UNCONNECTED to receive from anyone
-            local res, err = NetworkManager.udp:setsockname("*", port)
+            -- [[ CHANGE: Use '0.0.0.0' to force IPv4 binding ]]
+            local res, err = NetworkManager.udp:setsockname("0.0.0.0", port)
             if res then
-                print("[Net] HOST started. Listening on port " .. port)
+                print("[Net] HOST Initialized on 0.0.0.0:" .. port)
             else
-                print("[Net] HOST failed to bind: " .. tostring(err))
+                print("[Net] HOST Bind Failed: " .. tostring(err))
             end
         else
-            -- Client: Will connect later
-            print("[Net] CLIENT initialized.")
+            print("[Net] CLIENT Initialized")
         end
     end
 
     function NetworkManager.Connect(ip, port)
         if not NetworkManager.udp then return end
-        
-        print("[Net] Connecting to " .. ip .. ":" .. port)
-        
-        -- Client: Connects to server. Socket becomes CONNECTED.
-        local res, err = NetworkManager.udp:setpeername(ip, port)
-        
-        if not res then
-            print("[Net] Connection failed: " .. tostring(err))
-        end
+        NetworkManager.udp:setpeername(ip, port)
     end
 
-	function NetworkManager.Poll()
+    function NetworkManager.Poll()
         if not NetworkManager.udp then return end
         
-        -- Debug: Check if we get stuck here
-        -- print("[Net] Polling...") 
+        -- Force non-blocking just in case
+        NetworkManager.udp:settimeout(0)
 
         local data, msg_or_ip, port_or_nil
 
@@ -63,39 +47,39 @@ return function()
         else
             data, msg_or_ip, port_or_nil = NetworkManager.udp:receivefrom()
         end
-        
-        -- If we reach here, receive() is NOT blocking
-        -- print("[Net] Poll Complete. Result: " .. tostring(data or msg_or_ip))
 
         if data then
-            print("[Net] RX: " .. data)
+            print("[Net] RX: " .. tostring(data))
             if NetworkManager.mode == "host" then
                 NetworkManager.last_client_ip = msg_or_ip
                 NetworkManager.last_client_port = port_or_nil
             end
         elseif msg_or_ip ~= "timeout" then
-            -- Only print REAL errors, ignore timeout (which is normal)
-            print("[Net] Receive error: " .. tostring(msg_or_ip))
+            print("[Net] Receive Error: " .. tostring(msg_or_ip))
         end
     end
 
     function NetworkManager.SendString(str, target_ip, target_port)
         if not NetworkManager.udp then return end
         
+        local success, err
+        
         if NetworkManager.mode == "client" then
-            -- CLIENT: sends to the connected peer automatically
-            NetworkManager.udp:send(str)
+            success, err = NetworkManager.udp:send(str)
         else
-            -- HOST: Must specify destination (sendto)
-            -- If target is provided, use it. Otherwise, reply to last sender.
             local ip = target_ip or NetworkManager.last_client_ip
             local port = target_port or NetworkManager.last_client_port
-            
             if ip and port then
-                NetworkManager.udp:sendto(str, ip, port)
+                success, err = NetworkManager.udp:sendto(str, ip, port)
             else
-                print("[Net] Error: Host tried to send data but has no target IP/Port!")
+                print("[Net] Error: Host has no target to send to.")
+                return
             end
+        end
+
+        -- [[ NEW: Log send failures ]]
+        if not success then
+            print("[Net] SEND FAILED: " .. tostring(err))
         end
     end
 

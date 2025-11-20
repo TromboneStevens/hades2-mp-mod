@@ -7,6 +7,7 @@ local folder = get_script_path()
 package.path = folder .. "?.lua;" .. folder .. "src/?.lua;" .. package.path
 
 local NetworkManager = require("NetworkManager")()
+local socket = require("socket") -- Need direct access to socket for the test
 
 -- 1. Initialize Socket
 if config and config.mode == "host" then
@@ -18,34 +19,43 @@ end
 
 local is_network_thread_running = false
 
--- 2. HOOK: Use modutil.mod.Path.Wrap
--- We need to go through 'modutil.mod' to reach the library functions
+-- 2. HOOK: Wrap SetupMap
 modutil.mod.Path.Wrap("SetupMap", function(base, ...)
-    -- Call the original game function first
-    base(...)
+    base(...) 
 
-    -- Now run our custom code
     if is_network_thread_running then return end
     is_network_thread_running = true
 
-    print("[Hades2MP] SetupMap Hook Triggered. Starting Network Thread.")
+    print("[Hades2MP] SetupMap Hook Triggered.")
 
     thread(function()
         wait(1.0) 
-        print("[Hades2MP] Sending In-Game Test Packet...")
         
+        -- [[ IMPROVED TEST LOGIC ]]
         if config.mode == "host" then
-            if NetworkManager.udp then
-                -- Use 127.0.0.1 explicitly for loopback testing
-                NetworkManager.udp:sendto("HOST IN-GAME PACKET", "127.0.0.1", 7777)
+            print("[Hades2MP] Host Mode: Creating temporary client for handshake test...")
+            
+            -- Create a temporary "Fake Client" just to send a packet
+            local temp_client = socket.udp()
+            temp_client:setpeername("127.0.0.1", 7777)
+            local res, err = temp_client:send("HELLO FROM FAKE CLIENT")
+            
+            if res then
+                print("[Hades2MP] Test packet sent successfully.")
+            else
+                print("[Hades2MP] Test packet FAILED to send: " .. tostring(err))
             end
+            
+            temp_client:close()
         else
+            print("[Hades2MP] Client Mode: Sending packet to server...")
             NetworkManager.SendString("CLIENT IN-GAME PACKET")
         end
 
+        -- Network Loop
         while true do
             NetworkManager.Poll()
-            wait(0)
+            wait(0.1)
         end
     end)
 end)
