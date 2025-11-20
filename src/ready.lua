@@ -9,15 +9,8 @@ local folder = get_script_path()
 -- Setup Paths
 package.path = folder .. "?.lua;" .. folder .. "src/?.lua;" .. package.path
 
--- 'enet' and 'config' are now injected directly into this script's environment by main.lua
-if not enet then
-    print("[Hades2MP] ERROR: ENet library was not injected into ready.lua!")
-    return
-end
-
 -- Load Network Manager
--- We pass the 'enet' variable that exists in our scope
-local NetworkManager = require("NetworkManager")(enet)
+local NetworkManager = require("NetworkManager")() 
 
 -- Initialize
 if config and config.is_host then
@@ -29,8 +22,14 @@ end
 
 -- Game Loop
 thread(function()
+    print("[Hades2MP] Starting Network Loop...")
     while true do
+        -- print("[Hades2MP] Loop Tick") -- Uncomment if needed, but might spam log
+        
         NetworkManager.Poll()
-        wait(0)
+        
+        -- Increase wait to 0.1 seconds (10 times a second) to prevent freezing
+        -- If the game loads with this, we know wait(0) was spinning too fast.
+        wait(0.1)
     end
 end)
