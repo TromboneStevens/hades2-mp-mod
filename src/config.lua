@@ -3,7 +3,7 @@ return {
   enabled = true;
   
   -- Networking Config
-  mode = "host", -- Options: "host", "client", "loopback"
+  mode = "host", -- Options: "host", "client"
   port = 7777,
   target_ip = "127.0.0.1", -- Localhost for testing
   

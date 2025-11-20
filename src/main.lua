@@ -6,40 +6,6 @@ local folder = _PLUGIN.plugins_mod_folder_path
 package.cpath = folder .. "/?.dll;" .. package.cpath
 package.path = folder .. "/?.lua;" .. package.path
 
---[[ Load ENet
--- Attempt to load directly via loadlib to bypass require's return value handling
-local lib_path = folder .. "/enet.dll"
-local loader, err = package.loadlib(lib_path, "luaopen_enet")
-local lib
-
-if loader then
-    -- Run the initialization function directly, which should return the table
-    lib = loader()
-else
-    print("[Hades2MP] loadlib error: " .. tostring(err) .. ". Falling back to require.")
-    local status, req_result = pcall(require, "enet")
-    if status then
-        lib = req_result
-    end
-end
-
--- Fallback: If lib is still not a table, check globals or package.loaded
-if type(lib) ~= "table" then
-    if _G.enet then
-        lib = _G.enet
-    elseif type(package.loaded.enet) == "table" then
-        lib = package.loaded.enet
-    end
-end
-
-if type(lib) ~= "table" then
-    print("[Hades2MP] CRITICAL: Failed to retrieve enet table. Lib content: " .. tostring(lib))
-    return
-end
-
-print("[Hades2MP] ENet Loaded successfully.")
---]]
-
 -- Standard Loader
 rom = rom
 _PLUGIN = _PLUGIN
