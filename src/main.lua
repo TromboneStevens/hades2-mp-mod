@@ -21,13 +21,14 @@ reload = mods['SGG_Modding-ReLoad']
 config = chalk.auto 'config.lua'
 
 -- Prepare a shared context table to pass data safely
--- We use this instead of _G to avoid sandbox issues
 local mod_context = {
-    enet = lib,
     config = config,
     rom = rom,
     game = game,
-    _PLUGIN = _PLUGIN
+    _PLUGIN = _PLUGIN,
+    modutil = modutil,
+    sjson = sjson,
+    chalk = chalk
 }
 
 local function run_script(filename)
