@@ -8,15 +8,15 @@ package.cpath = folder .. "/?.dll;" .. package.cpath
 
 -- Load ENet
 local status, lib = pcall(require, "enet")
-
 if not status then
-    print("[Hades2MP] CRITICAL: " .. tostring(lib))
+    print("[Hades2MP] CRITICAL ERROR: Could not load enet.dll. Make sure it is a Lua 5.2 compatible DLL.")
+    print("Error: " .. tostring(lib))
     return
 end
 
+-- Store it globally for NetworkManager to find
 public.enet = lib
-public.enet.initialize()
-print("[Hades2MP] ENet Loaded Successfully.")
+print("[Hades2MP] ENet Loaded. Library type: " .. type(lib))
 
 -- 2. STANDARD MOD LOADER BOILERPLATE
 rom = rom

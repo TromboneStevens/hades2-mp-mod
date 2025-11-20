@@ -1,59 +1,80 @@
 ---@meta _
-local lib = public.enet 
+-- Use the enet library stored in the global 'public' table by main.lua
+local enet = public.enet 
 local NetworkManager = {}
 
+-- Stores the host object (Server or Client)
 NetworkManager.host = nil
-NetworkManager.peers = {}
 
+-- Stores the peer object for the server (if we are a client)
+NetworkManager.server_peer = nil 
+
+-- Initialize ENet as either a Host (Server) or Client
 function NetworkManager.Init(mode, port)
-    -- The C code now handles the complex setup!
-    -- Usage: host_create(mode, port)
     if mode == "host" then
-        print("[Net] Starting Server on port " .. port)
-        NetworkManager.host = lib.host_create("server", port)
+        print("[Net] Starting HOST on port " .. port)
+        -- "0.0.0.0:port" binds to all local IPs so friends can connect
+        NetworkManager.host = enet.host_create("0.0.0.0:" .. port)
     else
-        print("[Net] Starting Client...")
-        NetworkManager.host = lib.host_create("client")
+        print("[Net] Starting CLIENT...")
+        -- Clients don't bind to a port, so we pass nothing (or nil) to let the OS pick one
+        NetworkManager.host = enet.host_create()
     end
-    
-    if NetworkManager.host == nil then
-        print("[Net] FATAL: Host creation failed.")
+
+    if not NetworkManager.host then
+        print("[Net] FATAL: Failed to create ENet host!")
     end
 end
 
+-- Connect to a specific IP and Port (Client only)
 function NetworkManager.Connect(ip, port)
-    if NetworkManager.host == nil then return end
-    print("[Net] Connecting to " .. ip .. ":" .. port)
+    if not NetworkManager.host then return end
     
-    -- The C code handles the address struct internally now
-    local result = lib.connect(NetworkManager.host, ip, port)
-    if not result then
-        print("[Net] Failed to initiate connection.")
-    end
+    local address = ip .. ":" .. port
+    print("[Net] Connecting to " .. address)
+    
+    -- connect() returns a 'peer' object representing the server connection
+    NetworkManager.server_peer = NetworkManager.host:connect(address)
 end
 
+-- Poll for network events (Run this every frame!)
 function NetworkManager.Poll()
-    if NetworkManager.host == nil then return end
+    if not NetworkManager.host then return end
+
+    -- Check for events. 0 means "don't wait", just check and return immediately.
+    -- This prevents the game from freezing.
+    local event = NetworkManager.host:service(0)
     
-    -- lib.host_service returns a table or nil, no pointers needed!
-    local event = lib.host_service(NetworkManager.host, 0)
-    
-    if event then
+    while event do
         if event.type == "connect" then
-            print("[Net] Connected!")
+            print("[Net] Connection established with: " .. tostring(event.peer))
             
         elseif event.type == "receive" then
-            print("[Net] Payload: " .. event.data)
+            print("[Net] Received: " .. event.data)
             
+            -- TODO: Add your packet handling logic here!
+            -- Example: 
+            -- if event.data == "Ping" then 
+            --     NetworkManager.SendString("Pong") 
+            -- end
+
         elseif event.type == "disconnect" then
             print("[Net] Disconnected.")
         end
+        
+        -- Get next event in the queue (if any)
+        event = NetworkManager.host:service(0)
     end
 end
 
+-- Send a string message to everyone
 function NetworkManager.SendString(str)
-    if NetworkManager.host == nil then return end
-    lib.broadcast(NetworkManager.host, str)
+    if not NetworkManager.host then return end
+    
+    -- 'broadcast' sends to all connected peers.
+    -- If you are a Client, you only have one peer (the server), so this sends to the server.
+    -- If you are a Host, this sends to all connected Clients.
+    NetworkManager.host:broadcast(str)
 end
 
 return NetworkManager
