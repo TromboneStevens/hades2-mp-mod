@@ -1,10 +1,25 @@
 ---@meta _
--- grabbing our dependencies,
--- these funky (---@) comments are just there
---	 to help VS Code find the definitions of things
-
----@diagnostic disable-next-line: undefined-global
 local mods = rom.mods
+mods.auto()
+local ffi = require("ffi")
+
+-- 1. Load Definitions
+import 'enet_defs.lua'
+
+-- 2. Resolve DLL Path
+-- _PLUGIN.path ensures this works whether installed on Drive C, D, or via r2modman
+local dll_path = _PLUGIN.path.. "/enet.dll" 
+
+-- 3. Load the Library
+-- We attach it to 'public' so other files (ready.lua) can access it
+public.enet = ffi.load(dll_path)
+
+-- 4. Initialize ENet (Must be done once per process)
+if public.enet.enet_initialize() ~= 0 then
+    print("FATAL: Failed to initialize ENet!")
+else
+    print("ENet Initialized Successfully.")
+end
 
 ---@module 'LuaENVY-ENVY-auto'
 mods['LuaENVY-ENVY'].auto()

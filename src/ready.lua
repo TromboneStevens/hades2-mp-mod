@@ -1,23 +1,28 @@
 ---@meta _
--- globals we define are private to our plugin!
----@diagnostic disable: lowercase-global
+import 'NetworkManager.lua' -- Loads the manager
 
--- here is where your mod sets up all the things it will do.
--- this file will not be reloaded if it changes during gameplay
--- 	so you will most likely want to have it reference
---	values and functions later defined in `reload.lua`.
+-- 1. Initialize based on config
+NetworkManager.Init(config.mode, config.port)
 
--- These are some sample code snippets of what you can do with our modding framework:
-local file = rom.path.combine(rom.paths.Content, 'Game/Text/en/ShellText.en.sjson')
-sjson.hook(file, function(data)
-	return sjson_ShellText(data)
+if config.mode == "client" then
+    NetworkManager.Connect(config.target_ip, config.port)
+end
+
+-- 2. Hook the Game Loop
+-- "EngineUpdate" is a standard hook point in SGG engine games
+modutil.mod.Path.Wrap("EngineUpdate", function(base,...)
+    -- Run the original game update
+    local result = base(...)
+    
+    -- Pump the network events
+    NetworkManager.Poll()
+    
+    return result
 end)
 
-modutil.mod.Path.Wrap("SetupMap", function(base, ...)
-	prefix_SetupMap()
-	return base(...)
-end)
-
+-- 3. Input Hook for Testing
+-- Pressing 'Gift' (usually G) sends a packet
 game.OnControlPressed({'Gift', function()
-	return trigger_Gift()
+    print("[Net] Sending Test Packet...")
+    NetworkManager.SendString("Hello from ".. (config.mode))
 end})
