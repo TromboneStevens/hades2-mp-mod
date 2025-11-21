@@ -1,0 +1,71 @@
+-- src/Scanner.lua
+return function(game, modutil, NetworkManager)
+    print("[Scanner] Starting Deep Scan on Candidates...")
+
+    -- The specific functions you found that we want to investigate
+    -- Added GetWeaponData and CheckWeaponCooldown
+    local target_functions = { 
+        "DoWeaponSounds", 
+        "StopWeaponSounds", 
+        "ApplyWeaponChanges",
+        "WeaponCastFired",
+        "GetWeaponData",       -- [[ NEW ]] The suspect
+        "CheckWeaponCooldown"  -- [[ NEW ]] Another likely candidate for basic attacks
+    }
+
+    local function GetHero()
+        if game.CurrentRun then return game.CurrentRun.Hero end
+        if game.CurrentHubRoom then return game.CurrentHubRoom.Hero end
+        return nil
+    end
+
+    local function IsHero(t)
+        local hero = GetHero()
+        if not hero then return false end
+        return t == hero or (t.ObjectId and t.ObjectId == hero.ObjectId) or (t.OwnerId and t.OwnerId == hero.ObjectId)
+    end
+
+    -- Helper to print arguments recursively (shallow)
+    local function DumpArgs(args)
+        local str = ""
+        for i, v in ipairs(args) do
+            if type(v) == "table" then
+                -- Try to find a name inside the table
+                local name = v.Name or v.Weapon or (v.ObjectId and "Unit:"..v.ObjectId) or "Table"
+                str = str .. string.format("[%d: {%s}] ", i, name)
+            else
+                str = str .. string.format("[%d: %s] ", i, tostring(v))
+            end
+        end
+        return str
+    end
+
+    -- Hook only the specific targets
+    for _, funcName in ipairs(target_functions) do
+        if game[funcName] then
+            modutil.mod.Path.Wrap(funcName, function(base, ...)
+                local args = {...}
+                
+                -- Check if Hero is involved in any argument
+                local heroInvolved = false
+                for _, v in ipairs(args) do
+                    if type(v) == "table" and IsHero(v) then
+                        heroInvolved = true
+                        break
+                    end
+                end
+
+                -- [[ REMOVED THE 'SEEN_FUNCTIONS' LIMIT ]]
+                -- We want to see this every time you click now.
+                if heroInvolved then
+                    print(string.format("[Scanner] HIT: %s | Args: %s", funcName, DumpArgs(args)))
+                end
+
+                return base(...)
+            end)
+            print("[Scanner] Hooked: " .. funcName)
+        else
+            print("[Scanner] Could not find: " .. funcName)
+        end
+    end
+end
