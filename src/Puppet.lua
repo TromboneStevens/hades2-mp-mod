@@ -3,8 +3,6 @@ return function(game, modutil)
     Puppet.Id = nil
     Puppet.CurrentAnim = "MelinoeIdle" 
 
-    -- [[ REMOVED: EnemyData Injection (Caused Access Violation) ]]
-
     function Puppet.Create(hero)
         if Puppet.Id then return end
         
@@ -12,9 +10,6 @@ return function(game, modutil)
         if not SpawnUnit then return end
 
         -- 1. REVERT TO NEMESIS (Stable Rig)
-        -- Nemesis shares the "Humanoid" skeleton with Melinoe, so the animation
-        -- will actually render. Skelly was invisible because his bone structure
-        -- didn't match the animation data.
         local targetUnit = "NPC_Nemesis_01" 
         
         print("[Puppet] Spawning Base Unit: " .. targetUnit)
@@ -42,38 +37,60 @@ return function(game, modutil)
                 game.SetUnitProperty({ Id = pId, Property = "UseHitShield", Value = false })
             end
 
-            -- Stop "Talk" prompt from appearing
             if game.UseableOff then
                 game.UseableOff({ Id = pId })
             end
             
-            -- 3. VISUAL SWAP & PERSISTENCE LOOP
+            -- 3. DYNAMIC VISUAL CLONING & DEBUGGING
+            -- We log the hero's visual state to finding out what's missing.
+            if game.SetThingProperty then
+                 -- Reset basics
+                 game.SetThingProperty({ Id = pId, Property = "Scale", Value = 1.0 }) 
+                 game.SetThingProperty({ Id = pId, Property = "Color", Value = {255, 255, 255, 255} })
+                 
+                 -- DEBUG LOGGING
+                 print("[Puppet] DEBUG: Scanning Hero Visuals...")
+                 print("[Puppet] Hero.Graphic: " .. tostring(hero.Graphic))
+                 print("[Puppet] Hero.Animation: " .. tostring(hero.Animation))
+                 if game.GetAnimationName then
+                    print("[Puppet] Hero.GetAnimationName: " .. tostring(game.GetAnimationName({ Id = hero.ObjectId })))
+                 end
+
+                 -- Try to copy specific visual properties
+                 if hero.Graphic then
+                    print("[Puppet] Applying Hero.Graphic: " .. tostring(hero.Graphic))
+                    game.SetThingProperty({ Id = pId, Property = "Graphic", Value = hero.Graphic })
+                 else
+                    -- Fallback: Force the known good animation as the graphic state
+                    print("[Puppet] Hero.Graphic is NIL. Defaulting to MelinoeIdle.")
+                    game.SetThingProperty({ Id = pId, Property = "Graphic", Value = "MelinoeIdle" })
+                 end
+
+                 game.SetThingProperty({ Id = pId, Property = "AnimOffsetZ", Value = 0 })
+            end
+            
+            -- 4. ANIMATION PERSISTENCE LOOP
             thread(function()
-                -- Initial forced swap using SetAnimation
                 if game.SetAnimation then
                     game.StopAnimation({ DestinationId = pId })
                     game.SetAnimation({ Name = "MelinoeIdle", DestinationId = pId })
                 end
-                
-                -- Reset any color tints Nemesis might have
-                if game.SetThingProperty then
-                     game.SetThingProperty({ Id = pId, Property = "Scale", Value = 1.0 }) 
-                     game.SetThingProperty({ Id = pId, Property = "Color", Value = {255, 255, 255, 255} })
-                end
 
-                -- The Persistence Loop
-                -- Nemesis has internal logic that tries to reset her state. 
-                -- We act as a watchdog to force her back to MelinoeIdle every tick.
                 while Puppet.Id == pId and game.IsAlive({ Id = pId }) do
                     local current = "Unknown"
                     if game.GetAnimationName then
                          current = game.GetAnimationName({ Id = pId })
                     end
                     
-                    -- If she reverted to "NemesisIdle" or anything else, smash it back.
                     if current ~= Puppet.CurrentAnim then
                          if game.SetAnimation then
                             game.SetAnimation({ Name = Puppet.CurrentAnim, DestinationId = pId })
+                         end
+                         -- Re-assert Graphic
+                         if game.SetThingProperty then
+                            -- Use whatever value worked (hero.Graphic or fallback)
+                            local targetGraphic = hero.Graphic or "MelinoeIdle"
+                            game.SetThingProperty({ Id = pId, Property = "Graphic", Value = targetGraphic })
                          end
                     end
                     
@@ -95,9 +112,7 @@ return function(game, modutil)
                 anim = "Melinoe" .. actionName
              end
              
-             -- Update our tracker so the loop knows this is the NEW intended state
              Puppet.CurrentAnim = anim
-             
              game.SetAnimation({ Name = anim, DestinationId = Puppet.Id })
         end
     end
