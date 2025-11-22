@@ -1,43 +1,49 @@
 -- src/PlayerTracker.lua
-
--- We return a "Constructor" function that takes the 'game' object
 return function(game)
     local PlayerTracker = {}
 
-    -- Helper to find the Hero ID in any game state (Run or Hub)
     function PlayerTracker.GetHeroId()
-        -- Method 1: Engine Direct (Most reliable)
-        if game.GetActiveUnitId then 
-            return game.GetActiveUnitId() 
-        end
-        
-        -- Method 2: Active Run Data
-        if game.CurrentRun and game.CurrentRun.Hero then 
-            return game.CurrentRun.Hero.ObjectId 
-        end
-        
-        -- Method 3: Hub/Crossroads Data
-        if game.CurrentHubRoom and game.CurrentHubRoom.Hero then 
-            return game.CurrentHubRoom.Hero.ObjectId 
-        end
-        
+        if game.GetActiveUnitId then return game.GetActiveUnitId() end
+        if game.CurrentRun and game.CurrentRun.Hero then return game.CurrentRun.Hero.ObjectId end
+        if game.CurrentHubRoom and game.CurrentHubRoom.Hero then return game.CurrentHubRoom.Hero.ObjectId end
         return nil
     end
 
-    -- The main function to get coordinates
-    function PlayerTracker.GetPosition()
+    function PlayerTracker.GetState()
         local id = PlayerTracker.GetHeroId()
+        if not id then return nil end
+
+        local loc = game.GetLocation({ Id = id }) or { X = 0, Y = 0 }
         
-        if id and game.GetLocation then
-            -- Use the "Named Argument Table" syntax we discovered
-            local loc = game.GetLocation({ Id = id })
-            
-            if loc then
-                return loc.X or loc.x, loc.Y or loc.y
+        -- [[ CHANGE: Removed Z-Axis logic ]]
+
+        local vel = { X = 0, Y = 0 }
+        if game.GetVelocity then
+            local vx, vy = game.GetVelocity({ Id = id })
+            if type(vx) == "number" then
+                vel = { X = vx, Y = vy or 0 }
+            elseif type(vx) == "table" then
+                vel = vx
             end
         end
-        
-        return nil, nil
+
+        local angle = 0
+        if game.GetAngle then
+            angle = game.GetAngle({ Id = id }) or 0
+        end
+
+        local anim = "Idle"
+        if game.GetAnimationName then
+            anim = game.GetAnimationName({ Id = id }) or "Idle"
+        end
+
+        return {
+            Id = id,
+            Loc = { X = loc.X, Y = loc.Y }, -- No Z
+            Vel = { X = vel.X, Y = vel.Y },
+            Angle = angle,
+            Anim = anim
+        }
     end
 
     return PlayerTracker

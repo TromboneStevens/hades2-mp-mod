@@ -8,6 +8,7 @@ return function()
     NetworkManager.mode = nil
     NetworkManager.last_client_ip = nil
     NetworkManager.last_client_port = nil
+    NetworkManager.has_connection = false
 
     function NetworkManager.Init(mode, port)
         NetworkManager.mode = mode
@@ -17,15 +18,18 @@ return function()
         NetworkManager.udp:settimeout(0)
 
         if mode == "host" then
-            -- [[ CHANGE: Use '0.0.0.0' to force IPv4 binding ]]
+            -- Bind to all interfaces so external IPs can connect
             local res, err = NetworkManager.udp:setsockname("0.0.0.0", port)
             if res then
                 print("[Net] HOST Initialized on 0.0.0.0:" .. port)
+                print("[Net] Waiting for client handshake...")
             else
                 print("[Net] HOST Bind Failed: " .. tostring(err))
             end
         else
             print("[Net] CLIENT Initialized")
+            -- Clients know their target immediately via config, so they are "connected"
+            NetworkManager.has_connection = true 
         end
     end
 
@@ -37,7 +41,7 @@ return function()
     function NetworkManager.Poll()
         if not NetworkManager.udp then return end
         
-        -- Force non-blocking just in case
+        -- Force non-blocking
         NetworkManager.udp:settimeout(0)
 
         local data, msg_or_ip, port_or_nil
@@ -49,8 +53,16 @@ return function()
         end
 
         if data then
-            print("[Net] RX: " .. tostring(data))
+            -- print("[Net] RX: " .. tostring(data)) -- Debug log
+            
             if NetworkManager.mode == "host" then
+                -- If this is the first packet we've seen, register the client
+                if not NetworkManager.has_connection then
+                    print(string.format("[Net] Client Connected: %s:%s", msg_or_ip, port_or_nil))
+                    NetworkManager.has_connection = true
+                end
+                
+                -- Keep updating address in case the client IP/Port changes (NAT traversal)
                 NetworkManager.last_client_ip = msg_or_ip
                 NetworkManager.last_client_port = port_or_nil
             end
@@ -69,15 +81,17 @@ return function()
         else
             local ip = target_ip or NetworkManager.last_client_ip
             local port = target_port or NetworkManager.last_client_port
+            
             if ip and port then
                 success, err = NetworkManager.udp:sendto(str, ip, port)
             else
-                print("[Net] Error: Host has no target to send to.")
+                -- [[ THE FIX ]]
+                -- If Host has no target, simply return. Do not error.
+                -- The Host must wait for the Client to send a packet first.
                 return
             end
         end
 
-        -- [[ NEW: Log send failures ]]
         if not success then
             print("[Net] SEND FAILED: " .. tostring(err))
         end
