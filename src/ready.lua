@@ -9,10 +9,7 @@ package.path = folder .. "?.lua;" .. folder .. "src/?.lua;" .. package.path
 local NetworkManager = require("NetworkManager")()
 local PlayerTrackerFactory = require("PlayerTracker")
 local SetupHooks = require("Hooks")
-
--- [[ DEBUG TOOLS (Disabled for Production) ]]
--- local SetupScanner = require("Scanner")
--- local Outputter = require("Outputter")() 
+local PuppetFactory = require("Puppet")
 
 if config and config.mode == "host" then
     NetworkManager.Init("host", config.port or 7777)
@@ -26,16 +23,26 @@ modutil.mod.Path.Wrap("SetupMap", function(base, ...)
     base(...) 
     
     thread(function()
-        wait(1.0)
-        print("[Hades2MP] Session Started")
+        -- [[ SAFETY DELAY ]]
+        wait(4.0)
+        
+        print("[Hades2MP] Session Started (Delayed)")
+        
+        -- Debug Room Info
+        if game.CurrentRun and game.CurrentRun.CurrentRoom then
+            print("[Hades2MP] Current Room: " .. tostring(game.CurrentRun.CurrentRoom.Name))
+        end
 
         local PlayerTracker = PlayerTrackerFactory(game)
+        local Puppet = PuppetFactory(game, modutil)
         
-        -- Initialize Hooks (Outputter is omitted, so it defaults to nil inside Hooks)
-        SetupHooks(game, modutil, NetworkManager)
-        
-        -- Scanner is disabled
-        -- SetupScanner(game, modutil, NetworkManager) 
+        SetupHooks(game, modutil, NetworkManager, nil, Puppet)
+
+        if game.CurrentRun and game.CurrentRun.Hero then
+            Puppet.Create(game.CurrentRun.Hero)
+        else
+            print("[Hades2MP] Hero not found, skipping Puppet spawn.")
+        end
 
         while true do
             NetworkManager.Poll()

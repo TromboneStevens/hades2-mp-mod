@@ -1,12 +1,8 @@
 -- src/Outputter.lua
--- [[ DEVELOPMENT TOOL ]]
--- This file is currently disabled/empty to keep the mod clean.
+-- [[ DEVELOPMENT TOOL - DISABLED ]]
 
--- PURPOSE:
--- The Outputter handles writing unique log entries to 'Hades2MP_Log.txt'.
--- It prevents log flooding by storing a history of 'seen' events and only 
--- writing new ones.
+-- This file previously handled logging unique events to a text file.
+-- It has been cleared to keep the project clean.
 
--- HOW TO RESTORE:
--- If you need to log data again (e.g., debugging why a specific weapon isn't syncing),
--- restore the file writing logic (return function() ... end) from previous versions.
+-- Returns a dummy nil so any lingering requires don't crash.
+return function() return nil end
