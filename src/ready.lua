@@ -23,18 +23,13 @@ modutil.mod.Path.Wrap("SetupMap", function(base, ...)
     base(...) 
     
     thread(function()
-        -- [[ SAFETY DELAY ]]
-        wait(4.0)
+        -- Wait for map assets (Nemesis) to load
+        wait(2.0)
         
-        print("[Hades2MP] Session Started (Delayed)")
+        print("[Hades2MP] Map Loaded. Initializing...")
         
-        -- Debug Room Info
-        if game.CurrentRun and game.CurrentRun.CurrentRoom then
-            print("[Hades2MP] Current Room: " .. tostring(game.CurrentRun.CurrentRoom.Name))
-        end
-
-        local PlayerTracker = PlayerTrackerFactory(game)
         local Puppet = PuppetFactory(game, modutil)
+        local PlayerTracker = PlayerTrackerFactory(game)
         
         SetupHooks(game, modutil, NetworkManager, nil, Puppet)
 
@@ -47,16 +42,12 @@ modutil.mod.Path.Wrap("SetupMap", function(base, ...)
         while true do
             NetworkManager.Poll()
             
-            if game then
+            -- Simple State Sync Loop
+            if game and PlayerTracker then
                 local state = PlayerTracker.GetState()
                 if state then
-                    local packet = string.format(
-                        "POS:%.2f:%.2f:%.2f:%s", 
-                        state.Loc.X, 
-                        state.Loc.Y, 
-                        state.Angle, 
-                        state.Anim
-                    )
+                    -- Send position packet (example)
+                    local packet = string.format("POS:%.2f:%.2f", state.Loc.X, state.Loc.Y)
                     -- NetworkManager.SendString(packet)
                 end
             end
