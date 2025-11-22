@@ -10,8 +10,9 @@ local NetworkManager = require("NetworkManager")()
 local PlayerTrackerFactory = require("PlayerTracker")
 local SetupHooks = require("Hooks")
 
--- Scanner is disabled for now, but can be re-enabled for debugging
--- local SetupScanner = require("Scanner") 
+-- [[ DEBUG TOOLS (Disabled for Production) ]]
+-- local SetupScanner = require("Scanner")
+-- local Outputter = require("Outputter")() 
 
 if config and config.mode == "host" then
     NetworkManager.Init("host", config.port or 7777)
@@ -30,11 +31,11 @@ modutil.mod.Path.Wrap("SetupMap", function(base, ...)
 
         local PlayerTracker = PlayerTrackerFactory(game)
         
-        -- Initialize Combat Hooks
+        -- Initialize Hooks (Outputter is omitted, so it defaults to nil inside Hooks)
         SetupHooks(game, modutil, NetworkManager)
-
-        -- Debug: Run Scanner instead of Hooks if you need to find new functions
-        -- SetupScanner(game, modutil, NetworkManager)
+        
+        -- Scanner is disabled
+        -- SetupScanner(game, modutil, NetworkManager) 
 
         while true do
             NetworkManager.Poll()
@@ -42,7 +43,6 @@ modutil.mod.Path.Wrap("SetupMap", function(base, ...)
             if game then
                 local state = PlayerTracker.GetState()
                 if state then
-                    -- Send Position Update
                     local packet = string.format(
                         "POS:%.2f:%.2f:%.2f:%s", 
                         state.Loc.X, 
