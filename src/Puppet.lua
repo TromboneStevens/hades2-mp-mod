@@ -7,111 +7,121 @@ return function(game, modutil)
         if Puppet.Id then return end
         
         local SpawnUnit = game.SpawnUnit or _G.SpawnUnit or rom.game.SpawnUnit
-        if not SpawnUnit then return end
+        if not SpawnUnit then 
+            print("[Puppet] Error: SpawnUnit function not found.")
+            return 
+        end
+        
+        print("[Puppet] Spawning Multiplayer Puppet...")
 
-        -- 1. REVERT TO NEMESIS (Stable Rig)
-        local targetUnit = "NPC_Nemesis_01" 
+        -- [[ 1. LOCATE PLAYER DEFINITION ]]
+        -- We spawn the actual PlayerUnit to get the correct Mesh/Graphic, 
+        -- but we must find its definition in memory to modify it temporarily.
+        local targetName = "_PlayerUnit"
+        local targetTable = nil
+
+        if game.HeroData and game.HeroData[targetName] then
+            targetTable = game.HeroData
+        elseif game.UnitData and game.UnitData[targetName] then
+            targetTable = game.UnitData
+        elseif game.EnemyData and game.EnemyData[targetName] then
+            targetTable = game.EnemyData
+        end
+
+        if not targetTable then
+            -- Fallback: Should not happen, but safe to handle
+            print("[Puppet] Warning: Could not find _PlayerUnit. Injecting fallback...")
+            game.EnemyData[targetName] = game.DeepCopyTable(game.HeroData.DefaultHero or {})
+            targetTable = game.EnemyData
+        end
+
+        -- [[ 2. THE HIJACK (CRITICAL) ]]
+        -- We temporarily disable 'PlayerControlled'. This prevents the engine from 
+        -- attaching input/camera logic to this new unit, which causes the crash.
+        local unitDef = targetTable[targetName]
+        local backupControlled = unitDef.PlayerControlled
         
-        print("[Puppet] Spawning Base Unit: " .. targetUnit)
+        unitDef.PlayerControlled = false
         
-        local spawnResult = SpawnUnit({
-            Name = targetUnit,
+        -- [[ 3. SPAWN ]]
+        local spawnArgs = {
+            Name = targetName,
             Group = "Standing",
             DestinationId = hero.ObjectId,
             OffsetX = -100, 
             OffsetY = 0
-        })
+        }
+
+        -- Use pcall to ensure we ALWAYS restore the definition, even if Spawn fails
+        local status, result = pcall(SpawnUnit, spawnArgs)
         
-        local pId = (type(spawnResult) == "number") and spawnResult or (spawnResult and spawnResult.ObjectId)
+        -- [[ 4. RESTORE DEFINITION ]]
+        unitDef.PlayerControlled = backupControlled
         
+        if not status then
+            print("[Puppet] Spawn Failed: " .. tostring(result))
+            return
+        end
+
+        local pId = (type(result) == "number") and result or (result and result.ObjectId)
+
         if pId and pId > 0 then
-            print("[Puppet] SUCCESS: Puppet ID: " .. tostring(pId))
             Puppet.Id = pId
+            print("[Puppet] Spawn Successful. ID: " .. tostring(pId))
             
-            -- 2. LOBOTOMY (Disable AI & Interactions)
+            -- [[ 5. INITIALIZATION ]]
+            -- Initialize basic physics/logic, but ignore AI since it's a puppet
+            game.SetupUnit({ Name = targetName, ObjectId = pId }, game.CurrentRun, {
+                IgnoreAI = true,
+                PreLoadBinks = true,
+                IgnoreAssert = true
+            })
+            
+            -- [[ 6. LOBOTOMY (Disable Physics) ]]
+            -- Ensure the puppet is purely visual and doesn't collide or fall
             if game.SetUnitProperty then
-                game.SetUnitProperty({ Id = pId, Property = "Speed", Value = 0 })
-                game.SetUnitProperty({ Id = pId, Property = "CollideWithUnits", Value = false })
-                game.SetUnitProperty({ Id = pId, Property = "ImmuneToStun", Value = true })
-                game.SetUnitProperty({ Id = pId, Property = "IsInvulnerable", Value = true })
-                game.SetUnitProperty({ Id = pId, Property = "UseHitShield", Value = false })
+                 game.SetUnitProperty({ Id = pId, Property = "Speed", Value = 0 })
+                 game.SetUnitProperty({ Id = pId, Property = "CollideWithUnits", Value = false })
+                 game.SetUnitProperty({ Id = pId, Property = "ImmuneToStun", Value = true })
+                 game.SetUnitProperty({ Id = pId, Property = "IsInvulnerable", Value = true })
+                 game.SetUnitProperty({ Id = pId, Property = "UseHitShield", Value = false })
             end
 
-            if game.UseableOff then
-                game.UseableOff({ Id = pId })
-            end
-            
-            -- 3. DYNAMIC VISUAL CLONING & DEBUGGING
-            -- We log the hero's visual state to finding out what's missing.
+            -- Ensure it's visible (just in case)
             if game.SetThingProperty then
-                 -- Reset basics
-                 game.SetThingProperty({ Id = pId, Property = "Scale", Value = 1.0 }) 
+                 game.SetThingProperty({ Id = pId, Property = "Material", Value = "Unlit" })
+                 game.SetThingProperty({ Id = pId, Property = "Scale", Value = 1.0 })
                  game.SetThingProperty({ Id = pId, Property = "Color", Value = {255, 255, 255, 255} })
-                 
-                 -- DEBUG LOGGING
-                 print("[Puppet] DEBUG: Scanning Hero Visuals...")
-                 print("[Puppet] Hero.Graphic: " .. tostring(hero.Graphic))
-                 print("[Puppet] Hero.Animation: " .. tostring(hero.Animation))
-                 if game.GetAnimationName then
-                    print("[Puppet] Hero.GetAnimationName: " .. tostring(game.GetAnimationName({ Id = hero.ObjectId })))
-                 end
-
-                 -- Try to copy specific visual properties
-                 if hero.Graphic then
-                    print("[Puppet] Applying Hero.Graphic: " .. tostring(hero.Graphic))
-                    game.SetThingProperty({ Id = pId, Property = "Graphic", Value = hero.Graphic })
-                 else
-                    -- Fallback: Force the known good animation as the graphic state
-                    print("[Puppet] Hero.Graphic is NIL. Defaulting to MelinoeIdle.")
-                    game.SetThingProperty({ Id = pId, Property = "Graphic", Value = "MelinoeIdle" })
-                 end
-
-                 game.SetThingProperty({ Id = pId, Property = "AnimOffsetZ", Value = 0 })
             end
             
-            -- 4. ANIMATION PERSISTENCE LOOP
+            -- [[ 7. ANIMATION LOOP ]]
             thread(function()
+                -- Force initial state
                 if game.SetAnimation then
+                    local anim = "MelinoeIdle"
                     game.StopAnimation({ DestinationId = pId })
-                    game.SetAnimation({ Name = "MelinoeIdle", DestinationId = pId })
+                    game.SetAnimation({ Name = anim, DestinationId = pId })
                 end
 
+                -- Keep the coroutine alive to manage the puppet
                 while Puppet.Id == pId and game.IsAlive({ Id = pId }) do
-                    local current = "Unknown"
-                    if game.GetAnimationName then
-                         current = game.GetAnimationName({ Id = pId })
-                    end
-                    
-                    if current ~= Puppet.CurrentAnim then
-                         if game.SetAnimation then
-                            game.SetAnimation({ Name = Puppet.CurrentAnim, DestinationId = pId })
-                         end
-                         -- Re-assert Graphic
-                         if game.SetThingProperty then
-                            -- Use whatever value worked (hero.Graphic or fallback)
-                            local targetGraphic = hero.Graphic or "MelinoeIdle"
-                            game.SetThingProperty({ Id = pId, Property = "Graphic", Value = targetGraphic })
-                         end
-                    end
-                    
-                    wait(0.1) 
+                    wait(1.0) 
                 end
             end)
 
         else
-            print("[Puppet] FAIL: Puppet failed to spawn.")
+            print("[Puppet] Spawn returned invalid ID.")
         end
     end
 
     function Puppet.Mimic(actionName)
         if not Puppet.Id then return end
-        
         if game.SetAnimation then
              local anim = actionName
+             -- Ensure we map generic actions to Melinoe animations
              if not string.find(anim, "Melinoe") then
                 anim = "Melinoe" .. actionName
              end
-             
              Puppet.CurrentAnim = anim
              game.SetAnimation({ Name = anim, DestinationId = Puppet.Id })
         end
