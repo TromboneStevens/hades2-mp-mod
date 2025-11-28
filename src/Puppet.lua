@@ -41,7 +41,21 @@ return function(game, modutil)
         local unitDef = targetTable[targetName]
         local backupControlled = unitDef.PlayerControlled
         
+        -- [[ COLLISION FIX: PRE-SPAWN ]]
+        -- We must disable collision in the definition itself. 
+        -- Runtime changes (SetThingProperty) often fail to update the physics body after creation.
+        if not unitDef.Thing then unitDef.Thing = {} end
+        
+        -- Backups
+        local backupStopsUnits = unitDef.Thing.StopsUnits
+        local backupStopsProjectiles = unitDef.Thing.StopsProjectiles
+        local backupCollideWithUnits = unitDef.CollideWithUnits
+
+        -- Apply Overrides
         unitDef.PlayerControlled = false
+        unitDef.Thing.StopsUnits = false
+        unitDef.Thing.StopsProjectiles = false
+        unitDef.CollideWithUnits = false -- Disables active collision checks (Reference: ShadeMerc)
         
         -- [[ 3. SPAWN ]]
         local spawnArgs = {
@@ -57,6 +71,9 @@ return function(game, modutil)
         
         -- [[ 4. RESTORE DEFINITION ]]
         unitDef.PlayerControlled = backupControlled
+        unitDef.Thing.StopsUnits = backupStopsUnits
+        unitDef.Thing.StopsProjectiles = backupStopsProjectiles
+        unitDef.CollideWithUnits = backupCollideWithUnits
         
         if not status then
             print("[Puppet] Spawn Failed: " .. tostring(result))
