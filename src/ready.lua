@@ -23,7 +23,7 @@ modutil.mod.Path.Wrap("SetupMap", function(base, ...)
     base(...) 
     
     thread(function()
-        -- Wait for map assets (Nemesis) to load
+        -- Wait for map assets to load
         wait(2.0)
         
         print("[Hades2MP] Map Loaded. Initializing...")

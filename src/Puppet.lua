@@ -14,49 +14,51 @@ return function(game, modutil)
         
         print("[Puppet] Spawning Multiplayer Puppet...")
 
-        -- [[ 1. LOCATE PLAYER DEFINITION ]]
-        -- We spawn the actual PlayerUnit to get the correct Mesh/Graphic, 
-        -- but we must find its definition in memory to modify it temporarily.
+        -- [[ 1. TARGET ENGINE UNIT ]]
+        -- We use "_PlayerUnit" because the C++ Engine knows exactly what assets (Mesh/Anim) this uses.
+        -- We don't need to find a Lua definition (DefaultHero) to copy; we just need to override the existing one.
         local targetName = "_PlayerUnit"
         local targetTable = nil
 
+        -- Search for existing Lua definition to hijack
         if game.HeroData and game.HeroData[targetName] then
             targetTable = game.HeroData
-        elseif game.UnitData and game.UnitData[targetName] then
-            targetTable = game.UnitData
         elseif game.EnemyData and game.EnemyData[targetName] then
             targetTable = game.EnemyData
-        end
-
-        if not targetTable then
-            -- Fallback: Should not happen, but safe to handle
-            print("[Puppet] Warning: Could not find _PlayerUnit. Injecting fallback...")
-            game.EnemyData[targetName] = game.DeepCopyTable(game.HeroData.DefaultHero or {})
+        else
+            -- FALLBACK: If not found in Lua, create a blank entry in EnemyData.
+            -- The engine will merge this table with the internal SJSON definition.
+            print("[Puppet] Definition for " .. targetName .. " not found in Lua. Injecting blank override...")
+            if not game.EnemyData then game.EnemyData = {} end
+            
+            -- We initialize it as an empty table. We DON'T need DefaultHero.
+            -- The Engine supplies the defaults; we supply the overrides.
+            if not game.EnemyData[targetName] then
+                game.EnemyData[targetName] = {}
+            end
             targetTable = game.EnemyData
         end
 
-        -- [[ 2. THE HIJACK (CRITICAL) ]]
-        -- We temporarily disable 'PlayerControlled'. This prevents the engine from 
-        -- attaching input/camera logic to this new unit, which causes the crash.
         local unitDef = targetTable[targetName]
+
+        -- [[ 2. APPLY OVERRIDES (Hijack) ]]
+        -- We back up values if they exist, to restore them later.
         local backupControlled = unitDef.PlayerControlled
+        local backupCollide = unitDef.CollideWithUnits
         
-        -- [[ COLLISION FIX: PRE-SPAWN ]]
-        -- We must disable collision in the definition itself. 
-        -- Runtime changes (SetThingProperty) often fail to update the physics body after creation.
+        -- Ensure 'Thing' sub-table exists for physics overrides
         if not unitDef.Thing then unitDef.Thing = {} end
-        
-        -- Backups
         local backupStopsUnits = unitDef.Thing.StopsUnits
         local backupStopsProjectiles = unitDef.Thing.StopsProjectiles
-        local backupCollideWithUnits = unitDef.CollideWithUnits
+        local backupGrip = unitDef.Thing.Grip
 
-        -- Apply Overrides
-        unitDef.PlayerControlled = false
-        unitDef.Thing.StopsUnits = false
-        unitDef.Thing.StopsProjectiles = false
-        unitDef.CollideWithUnits = false -- Disables active collision checks (Reference: ShadeMerc)
-        
+        -- GHOST MODE: Disable Controller & Collision
+        unitDef.PlayerControlled = false     -- Prevents Input Crash
+        unitDef.CollideWithUnits = false     -- Disable Active Collision
+        unitDef.Thing.StopsUnits = false     -- Let players walk through
+        unitDef.Thing.StopsProjectiles = false -- Let attacks pass through
+        unitDef.Thing.Grip = 0               -- Remove friction
+
         -- [[ 3. SPAWN ]]
         local spawnArgs = {
             Name = targetName,
@@ -66,15 +68,16 @@ return function(game, modutil)
             OffsetY = 0
         }
 
-        -- Use pcall to ensure we ALWAYS restore the definition, even if Spawn fails
         local status, result = pcall(SpawnUnit, spawnArgs)
-        
+
         -- [[ 4. RESTORE DEFINITION ]]
+        -- Restore the global table to its previous state immediately.
         unitDef.PlayerControlled = backupControlled
+        unitDef.CollideWithUnits = backupCollide
         unitDef.Thing.StopsUnits = backupStopsUnits
         unitDef.Thing.StopsProjectiles = backupStopsProjectiles
-        unitDef.CollideWithUnits = backupCollideWithUnits
-        
+        unitDef.Thing.Grip = backupGrip
+
         if not status then
             print("[Puppet] Spawn Failed: " .. tostring(result))
             return
@@ -87,15 +90,15 @@ return function(game, modutil)
             print("[Puppet] Spawn Successful. ID: " .. tostring(pId))
             
             -- [[ 5. INITIALIZATION ]]
-            -- Initialize basic physics/logic, but ignore AI since it's a puppet
+            -- Use Safe Setup. We intentionally ignore AI because this unit is a puppet.
             game.SetupUnit({ Name = targetName, ObjectId = pId }, game.CurrentRun, {
                 IgnoreAI = true,
                 PreLoadBinks = true,
                 IgnoreAssert = true
             })
             
-            -- [[ 6. LOBOTOMY (Disable Physics) ]]
-            -- Ensure the puppet is purely visual and doesn't collide or fall
+            -- [[ 6. RUNTIME SAFETY ]]
+            -- Reinforce ghost properties at runtime just in case
             if game.SetUnitProperty then
                  game.SetUnitProperty({ Id = pId, Property = "Speed", Value = 0 })
                  game.SetUnitProperty({ Id = pId, Property = "CollideWithUnits", Value = false })
@@ -104,23 +107,21 @@ return function(game, modutil)
                  game.SetUnitProperty({ Id = pId, Property = "UseHitShield", Value = false })
             end
 
-            -- Ensure it's visible (just in case)
             if game.SetThingProperty then
+                 game.SetThingProperty({ Id = pId, Property = "StopsUnits", Value = false })
+                 game.SetThingProperty({ Id = pId, Property = "StopsProjectiles", Value = false })
                  game.SetThingProperty({ Id = pId, Property = "Material", Value = "Unlit" })
-                 game.SetThingProperty({ Id = pId, Property = "Scale", Value = 1.0 })
                  game.SetThingProperty({ Id = pId, Property = "Color", Value = {255, 255, 255, 255} })
             end
             
             -- [[ 7. ANIMATION LOOP ]]
             thread(function()
-                -- Force initial state
                 if game.SetAnimation then
                     local anim = "MelinoeIdle"
                     game.StopAnimation({ DestinationId = pId })
                     game.SetAnimation({ Name = anim, DestinationId = pId })
                 end
 
-                -- Keep the coroutine alive to manage the puppet
                 while Puppet.Id == pId and game.IsAlive({ Id = pId }) do
                     wait(1.0) 
                 end
@@ -133,9 +134,13 @@ return function(game, modutil)
 
     function Puppet.Mimic(actionName)
         if not Puppet.Id then return end
+        
+        -- NOTE: If your puppet is attacking when YOU attack, it is because 
+        -- src/Hooks.lua is calling this function. That is expected behavior 
+        -- for testing, but you can remove the hook later.
+        
         if game.SetAnimation then
              local anim = actionName
-             -- Ensure we map generic actions to Melinoe animations
              if not string.find(anim, "Melinoe") then
                 anim = "Melinoe" .. actionName
              end
