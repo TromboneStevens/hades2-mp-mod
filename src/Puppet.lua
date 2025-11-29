@@ -9,6 +9,7 @@ return function(game, modutil)
         local SpawnObstacle = game.SpawnObstacle or _G.SpawnObstacle
         local SetThingProperty = game.SetThingProperty or _G.SetThingProperty
         local SetAnimation = game.SetAnimation or _G.SetAnimation
+		local SetScale = game.SetScale or _G.SetScale
 
         if not SpawnObstacle then return end
 
@@ -29,8 +30,10 @@ return function(game, modutil)
             -- Swap mesh to Melinoe
             SetThingProperty({ Property = "GrannyModel", Value = "Melinoe_Mesh", DestinationId = Puppet.Id })
 
-            -- Set scale/anim to make it look right
-            SetThingProperty({ Property = "Scale", Value = 1, DestinationId = Puppet.Id })
+            if SetScale then
+                SetScale({ Id = Puppet.Id, Fraction = 0.7 })
+            end
+			
             SetAnimation({ Name = "MelinoeIdle", DestinationId = Puppet.Id })
 
             print("[Puppet] Spawned Melinoe Puppet ID: " .. tostring(Puppet.Id))
