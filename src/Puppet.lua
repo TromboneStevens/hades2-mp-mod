@@ -1,132 +1,154 @@
 return function(game, modutil)
     local Puppet = {}
     Puppet.Id = nil
-    Puppet.CurrentAnim = "MelinoeIdle" 
+    
+    -- We refer to the name defined in DataInjector
+    local puppetName = "NetPuppet"
 
     function Puppet.Create(hero)
         if Puppet.Id then return end
         
-        local SpawnUnit = game.SpawnUnit or _G.SpawnUnit or rom.game.SpawnUnit
-        if not SpawnUnit then 
-            print("[Puppet] Error: SpawnUnit function not found.")
-            return 
-        end
-        
-        print("[Puppet] Spawning Multiplayer Puppet...")
-
-        -- [[ 1. TARGET ENGINE UNIT ]]
-        -- We use "_PlayerUnit" because the C++ Engine knows exactly what assets (Mesh/Anim) this uses.
-        -- We don't need to find a Lua definition (DefaultHero) to copy; we just need to override the existing one.
-        local targetName = "_PlayerUnit"
-        local targetTable = nil
-
-        -- Search for existing Lua definition to hijack
-        if game.HeroData and game.HeroData[targetName] then
-            targetTable = game.HeroData
-        elseif game.EnemyData and game.EnemyData[targetName] then
-            targetTable = game.EnemyData
-        else
-            -- FALLBACK: If not found in Lua, create a blank entry in EnemyData.
-            -- The engine will merge this table with the internal SJSON definition.
-            print("[Puppet] Definition for " .. targetName .. " not found in Lua. Injecting blank override...")
-            if not game.EnemyData then game.EnemyData = {} end
+        -- [[ DIAGNOSTIC TEST: GHOST HERO ]]
+        -- Instead of spawning a puppet, we will try to apply the "Ghost Mode"
+        -- directly to the player character to see if the physics changes work.
+        if hero and hero.ObjectId then
+            print("[Puppet] Applying Ghost Mode to HERO (ID: " .. tostring(hero.ObjectId) .. ")...")
             
-            -- We initialize it as an empty table. We DON'T need DefaultHero.
-            -- The Engine supplies the defaults; we supply the overrides.
-            if not game.EnemyData[targetName] then
-                game.EnemyData[targetName] = {}
-            end
-            targetTable = game.EnemyData
+            local heroId = hero.ObjectId
+            
+            -- Launch a thread to maintain the ghost state on the player
+            thread(function()
+                while game.IsAlive({ Id = heroId }) do
+                    -- Force Physics OFF for the player
+                    if game.SetThingProperty then
+                        -- StopsUnits = False means you can walk through enemies/walls
+                        pcall(game.SetThingProperty, { Id = heroId, Property = "StopsUnits", Value = false })
+                        pcall(game.SetThingProperty, { Id = heroId, Property = "StopsProjectiles", Value = false })
+                        pcall(game.SetThingProperty, { Id = heroId, Property = "Grip", Value = 0 })
+                        
+                        -- Attempt to clear the collision mask if supported
+                        -- (This property name is a guess based on common engine patterns, might do nothing)
+                        pcall(game.SetThingProperty, { Id = heroId, Property = "CollisionMask", Value = 0 })
+                    end
+                    
+                    if game.SetUnitProperty then
+                        -- CollideWithUnits = False means you don't push others
+                        pcall(game.SetUnitProperty, { Id = heroId, Property = "CollideWithUnits", Value = false })
+                        pcall(game.SetUnitProperty, { Id = heroId, Property = "ImmuneToStun", Value = true })
+                    end
+                    
+                    -- Debug print occasionally
+                    -- print("[Puppet] Enforcing Ghost Hero...")
+                    
+                    wait(0.02) -- Check 50 times a second (very fast)
+                end
+            end)
+            
+            return -- Exit early, don't spawn the puppet
         end
 
-        local unitDef = targetTable[targetName]
-
-        -- [[ 2. APPLY OVERRIDES (Hijack) ]]
-        -- We back up values if they exist, to restore them later.
-        local backupControlled = unitDef.PlayerControlled
-        local backupCollide = unitDef.CollideWithUnits
+        -- ... existing spawn logic (skipped for this test) ...
         
-        -- Ensure 'Thing' sub-table exists for physics overrides
-        if not unitDef.Thing then unitDef.Thing = {} end
-        local backupStopsUnits = unitDef.Thing.StopsUnits
-        local backupStopsProjectiles = unitDef.Thing.StopsProjectiles
-        local backupGrip = unitDef.Thing.Grip
+        local SpawnFn = _G.SpawnUnit or game.SpawnUnit or (rom and rom.game and rom.game.SpawnUnit)
+        if not SpawnFn then return end
 
-        -- GHOST MODE: Disable Controller & Collision
-        unitDef.PlayerControlled = false     -- Prevents Input Crash
-        unitDef.CollideWithUnits = false     -- Disable Active Collision
-        unitDef.Thing.StopsUnits = false     -- Let players walk through
-        unitDef.Thing.StopsProjectiles = false -- Let attacks pass through
-        unitDef.Thing.Grip = 0               -- Remove friction
+        print("[Puppet] Spawning clone of " .. puppetName .. "...")
 
-        -- [[ 3. SPAWN ]]
+        -- [[ 1. LOCATE DEFINITION ]]
+        local sourceTable = nil
+        if game.HeroData and game.HeroData[puppetName] then
+            sourceTable = game.HeroData
+        elseif game.EnemyData and game.EnemyData[puppetName] then
+            sourceTable = game.EnemyData
+        else
+            if not game.EnemyData then game.EnemyData = {} end
+            game.EnemyData[puppetName] = {}
+            sourceTable = game.EnemyData
+        end
+
+        local unitDef = sourceTable[puppetName]
+
+        -- [[ 2. BACKUP & HIJACK ]]
+        local backupThing = unitDef.Thing
+        local backupCollide = unitDef.CollideWithUnits
+        local backupControl = unitDef.PlayerControlled
+
+        local newThing = {}
+        if backupThing then
+            for k, v in pairs(backupThing) do newThing[k] = v end
+        end
+
+        -- [[ 3. NUKE THE HITBOX ]]
+        newThing.Points = {} 
+        newThing.StopsUnits = false
+        newThing.StopsProjectiles = false
+        newThing.Grip = 0
+
+        -- Apply Hijack
+        unitDef.Thing = newThing
+        unitDef.CollideWithUnits = false
+        unitDef.PlayerControlled = false
+
+        -- [[ 4. SPAWN ]]
         local spawnArgs = {
-            Name = targetName,
+            Name = puppetName,
             Group = "Standing",
             DestinationId = hero.ObjectId,
             OffsetX = -100, 
             OffsetY = 0
         }
 
-        local status, result = pcall(SpawnUnit, spawnArgs)
+        local status, result = pcall(SpawnFn, spawnArgs)
 
-        -- [[ 4. RESTORE DEFINITION ]]
-        -- Restore the global table to its previous state immediately.
-        unitDef.PlayerControlled = backupControlled
-        unitDef.CollideWithUnits = backupCollide
-        unitDef.Thing.StopsUnits = backupStopsUnits
-        unitDef.Thing.StopsProjectiles = backupStopsProjectiles
-        unitDef.Thing.Grip = backupGrip
+        -- [[ 5. DELAYED RESTORE (THE FIX) ]]
+        -- We wait briefly before restoring so the engine consumes the "Ghost" data.
+        thread(function()
+            wait(0.2)
+            unitDef.Thing = backupThing
+            unitDef.CollideWithUnits = backupCollide
+            unitDef.PlayerControlled = backupControl
+            -- print("[Puppet] Definition Restored.") 
+        end)
 
         if not status then
             print("[Puppet] Spawn Failed: " .. tostring(result))
             return
         end
 
-        local pId = (type(result) == "number") and result or (result and result.ObjectId)
+        local pId = nil
+        if type(result) == "number" then pId = result
+        elseif type(result) == "table" and result.ObjectId then pId = result.ObjectId end
 
         if pId and pId > 0 then
             Puppet.Id = pId
             print("[Puppet] Spawn Successful. ID: " .. tostring(pId))
             
-            -- [[ 5. INITIALIZATION ]]
-            -- Use Safe Setup. We intentionally ignore AI because this unit is a puppet.
-            game.SetupUnit({ Name = targetName, ObjectId = pId }, game.CurrentRun, {
-                IgnoreAI = true,
-                PreLoadBinks = true,
-                IgnoreAssert = true
-            })
-            
-            -- [[ 6. RUNTIME SAFETY ]]
-            -- Reinforce ghost properties at runtime just in case
-            if game.SetUnitProperty then
-                 game.SetUnitProperty({ Id = pId, Property = "Speed", Value = 0 })
-                 game.SetUnitProperty({ Id = pId, Property = "CollideWithUnits", Value = false })
-                 game.SetUnitProperty({ Id = pId, Property = "ImmuneToStun", Value = true })
-                 game.SetUnitProperty({ Id = pId, Property = "IsInvulnerable", Value = true })
-                 game.SetUnitProperty({ Id = pId, Property = "UseHitShield", Value = false })
-            end
-
-            if game.SetThingProperty then
-                 game.SetThingProperty({ Id = pId, Property = "StopsUnits", Value = false })
-                 game.SetThingProperty({ Id = pId, Property = "StopsProjectiles", Value = false })
-                 game.SetThingProperty({ Id = pId, Property = "Material", Value = "Unlit" })
-                 game.SetThingProperty({ Id = pId, Property = "Color", Value = {255, 255, 255, 255} })
-            end
-            
-            -- [[ 7. ANIMATION LOOP ]]
+            -- [[ 6. RUNTIME ENFORCEMENT LOOP ]]
             thread(function()
-                if game.SetAnimation then
-                    local anim = "MelinoeIdle"
-                    game.StopAnimation({ DestinationId = pId })
-                    game.SetAnimation({ Name = anim, DestinationId = pId })
-                end
-
+                -- Wait a frame to ensure the unit is initialized
+                wait(0.1)
+                
                 while Puppet.Id == pId and game.IsAlive({ Id = pId }) do
-                    wait(1.0) 
+                     -- A. ANIMATION
+                     if game.SetAnimation and Puppet.CurrentAnim then
+                         pcall(game.SetAnimation, { Name = Puppet.CurrentAnim or "MelinoeIdle", DestinationId = pId })
+                     end
+
+                     -- B. PHYSICS (Force every frame)
+                     -- Since _PlayerUnit defaults to solid, we must fight the engine.
+                     if game.SetThingProperty then
+                        pcall(game.SetThingProperty, { Id = pId, Property = "StopsUnits", Value = false })
+                        pcall(game.SetThingProperty, { Id = pId, Property = "StopsProjectiles", Value = false })
+                        pcall(game.SetThingProperty, { Id = pId, Property = "Grip", Value = 0 })
+                     end
+                     if game.SetUnitProperty then
+                        pcall(game.SetUnitProperty, { Id = pId, Property = "CollideWithUnits", Value = false })
+                        pcall(game.SetUnitProperty, { Id = pId, Property = "ImmuneToStun", Value = true })
+                     end
+
+                     wait(0.1) -- Check 10 times a second
                 end
             end)
-
         else
             print("[Puppet] Spawn returned invalid ID.")
         end
@@ -134,18 +156,11 @@ return function(game, modutil)
 
     function Puppet.Mimic(actionName)
         if not Puppet.Id then return end
-        
-        -- NOTE: If your puppet is attacking when YOU attack, it is because 
-        -- src/Hooks.lua is calling this function. That is expected behavior 
-        -- for testing, but you can remove the hook later.
-        
         if game.SetAnimation then
              local anim = actionName
-             if not string.find(anim, "Melinoe") then
-                anim = "Melinoe" .. actionName
-             end
-             Puppet.CurrentAnim = anim
-             game.SetAnimation({ Name = anim, DestinationId = Puppet.Id })
+             if not string.find(anim, "Melinoe") then anim = "Melinoe" .. actionName end
+             pcall(game.SetAnimation, { Name = anim, DestinationId = Puppet.Id })
+             Puppet.CurrentAnim = anim 
         end
     end
 

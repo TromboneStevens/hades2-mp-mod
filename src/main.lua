@@ -20,7 +20,7 @@ reload = mods['SGG_Modding-ReLoad']
 -- Config Setup
 config = chalk.auto 'config.lua'
 
--- Prepare a shared context table to pass data safely
+-- Shared Context
 local mod_context = {
     config = config,
     rom = rom,
@@ -32,25 +32,20 @@ local mod_context = {
 }
 
 local function run_script(filename)
-    -- Load the file as a chunk
     local chunk, err = loadfile(folder .. "/" .. filename)
     if not chunk then
         print("[Hades2MP] Error loading " .. filename .. ": " .. tostring(err))
         return
     end
     
-    -- Create a custom environment for the script that inherits from _G
-    -- but also has our mod_context variables injected directly.
     local env = setmetatable({}, {
         __index = function(t, k)
             return mod_context[k] or _G[k]
         end,
-        __newindex = _G -- Writes go to global
+        __newindex = _G
     })
     
-    -- Apply environment and run
-    if setfenv then setfenv(chunk, env) end -- Lua 5.1 style (just in case)
-    -- Lua 5.2+ style: the first upvalue of a chunk is _ENV
+    if setfenv then setfenv(chunk, env) end
     local i = 1
     while true do
         local name = debug.getupvalue(chunk, i)
@@ -63,17 +58,30 @@ local function run_script(filename)
         i = i + 1
     end
 
-    chunk()
+    return chunk()
 end
 
 local function on_ready()
     if config.enabled == false then return end
+    
     mod = modutil.mod.Mod.Register(_PLUGIN.guid)
+    
+    -- [[ INJECTION POINT ]]
+    -- We run the DataInjector immediately. 
+    -- This ensures NetPuppet exists in the data tables before any game logic runs.
+    local Injector = run_script("DataInjector.lua")
+    if Injector then Injector(game) end
+    
     run_script("ready.lua")
 end
 
 local function on_reload()
     if config.enabled == false then return end
+    
+    -- Re-inject on reload to ensure definitions persist
+    local Injector = run_script("DataInjector.lua")
+    if Injector then Injector(game) end
+
     run_script("reload.lua")
 end
 
