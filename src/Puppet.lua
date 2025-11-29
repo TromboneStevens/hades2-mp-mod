@@ -14,8 +14,7 @@ return function(game, modutil)
 
         local anchorId = hero and hero.ObjectId or 0
 
-        -- [[ USE SpawnObstacle INSTEAD OF SpawnUnit ]]
-        -- Obstacles are safe to model-swap because they don't have Unit AI/Skeletons.
+		-- Using SpawnObstacle instead of SpawnUnit to ensure its as bare bones as possible
         local newId = SpawnObstacle({
             Name = "BlankObstacle3D", -- A standard empty container
             Group = "Standing",
@@ -27,12 +26,11 @@ return function(game, modutil)
         if newId and newId > 0 then
             Puppet.Id = newId
             
-            -- [[ SAFE TO SWAP NOW ]]
-            -- Because it's an obstacle, this won't crash the physics engine.
+            -- Swap mesh to Melinoe
             SetThingProperty({ Property = "GrannyModel", Value = "Melinoe_Mesh", DestinationId = Puppet.Id })
 
             -- Set scale/anim to make it look right
-            SetThingProperty({ Property = "Scale", Value = 1.0, DestinationId = Puppet.Id })
+            SetThingProperty({ Property = "Scale", Value = 0.7, DestinationId = Puppet.Id })
             SetAnimation({ Name = "MelinoeIdle", DestinationId = Puppet.Id })
 
             print("[Puppet] Spawned Melinoe Puppet ID: " .. tostring(Puppet.Id))
