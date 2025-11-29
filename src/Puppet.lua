@@ -30,7 +30,7 @@ return function(game, modutil)
             SetThingProperty({ Property = "GrannyModel", Value = "Melinoe_Mesh", DestinationId = Puppet.Id })
 
             -- Set scale/anim to make it look right
-            SetThingProperty({ Property = "Scale", Value = 0.7, DestinationId = Puppet.Id })
+            SetThingProperty({ Property = "Scale", Value = 1, DestinationId = Puppet.Id })
             SetAnimation({ Name = "MelinoeIdle", DestinationId = Puppet.Id })
 
             print("[Puppet] Spawned Melinoe Puppet ID: " .. tostring(Puppet.Id))
