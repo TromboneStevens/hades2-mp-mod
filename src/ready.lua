@@ -54,20 +54,31 @@ modutil.mod.Path.Wrap("SetupMap", function(base, ...)
         end
 
         -- [[ MAIN LOOP ]]
+        local lastNetworkUpdate = 0
+        local networkRate = 0.05 -- 20 Hz network updates
+        
         while true do
+            local currentTime = _G.GetTime()
+            
+            -- Network Polling (Keep this frequent to drain the buffer)
             NetworkManager.Poll()
             
-            -- Simple State Sync Loop
+            -- Network Sending (Throttled)
+            if currentTime - lastNetworkUpdate > networkRate then
+               -- (Send logic would go here if you were sending state updates actively)
+               lastNetworkUpdate = currentTime
+            end
+            
+            -- Local Puppet Logic (Run this at 60 FPS for smooth animation)
             if game and PlayerTracker then
                 local state = PlayerTracker.GetState()
                 if state then
-                    -- Feed local player state to the puppet (Local Mirroring for testing)
                     Puppet.Sync(state)
                 end
             end
 
-            -- Update roughly 30 times a second
-            wait(0.03) 
+            -- Update roughly 60 times a second for smoother animation
+            wait(0.016) 
         end
     end)
 end)
