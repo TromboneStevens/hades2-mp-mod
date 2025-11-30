@@ -1,5 +1,5 @@
 -- src/Puppet.lua
-local Animations = require("Animations") -- Import our new animation database
+local Animations = require("Animations")
 
 return function(game, modutil)
     local Puppet = {}
@@ -11,18 +11,43 @@ return function(game, modutil)
     Puppet.CurrentFacing = 0
     Puppet.LastPivotTime = 0
     Puppet.CurrentGait = "Idle" -- "Idle", "Walk", "Run", "Sprint"
+    Puppet.CurrentWeapon = "NoWeapon" 
+    Puppet.LastSyncedAnim = ""
 
     function Puppet.Create(hero)
-        if Puppet.Id then return end
+        if Puppet.Id then 
+            print("[Puppet] Puppet.Id already exists: " .. tostring(Puppet.Id))
+            return 
+        end
 
         local SpawnObstacle = game.SpawnObstacle or _G.SpawnObstacle
         local SetThingProperty = game.SetThingProperty or _G.SetThingProperty
         local SetScale = game.SetScale or _G.SetScale
         local SetAnimation = game.SetAnimation or _G.SetAnimation
 
-        if not SpawnObstacle then return end
+        if not SpawnObstacle then 
+            print("[Puppet] Error: SpawnObstacle not found.")
+            return 
+        end
 
-        local anchorId = hero and hero.ObjectId or 0
+        local anchorId = hero and hero.ObjectId
+        if not anchorId or anchorId == 0 then
+            -- Fallback to ActiveUnitId if passed hero object is invalid
+            anchorId = game.GetActiveUnitId and game.GetActiveUnitId()
+        end
+
+        if not anchorId or anchorId == 0 then
+            print("[Puppet] Error: No valid anchor ID found for spawn.")
+            return
+        end
+
+        -- Debug Check for Animations
+        if not Animations or not Animations.Data or not Animations.Data.NoWeapon then
+            print("[Puppet] Error: Animations data invalid or missing.")
+            return
+        end
+
+        print("[Puppet] Attempting to spawn puppet near ID: " .. tostring(anchorId))
 
         -- 1. Spawn the Container
         local newId = SpawnObstacle({
@@ -40,13 +65,20 @@ return function(game, modutil)
             SetThingProperty({ Property = "GrannyModel", Value = "Melinoe_Mesh", DestinationId = Puppet.Id })
             
             if SetScale then
-                SetScale({ Id = Puppet.Id, Fraction = 0.7 })
+                SetScale({ Id = Puppet.Id, Fraction = 1.0 })
             end
             
             -- Set Initial Idle
-            pcall(SetAnimation, { Name = Animations.Idle, DestinationId = Puppet.Id })
+            local idleAnim = Animations.Data.NoWeapon.Idle
+            local success, err = pcall(SetAnimation, { Name = idleAnim, DestinationId = Puppet.Id })
+            
+            if not success then
+                print("[Puppet] Warning: Failed to set initial idle: " .. tostring(err))
+            end
 
             print("[Puppet] Spawned Melinoe Puppet (ID: " .. tostring(Puppet.Id) .. ")")
+        else
+            print("[Puppet] Error: SpawnObstacle failed (ID invalid).")
         end
     end
 
@@ -60,76 +92,119 @@ return function(game, modutil)
         local SetAnimation = game.SetAnimation or _G.SetAnimation
         local GetTime = _G.GetTime or os.clock
 
+        -- 1. Infer Weapon from the animation playing on the remote player
+        --    This keeps the puppet holding the correct weapon even if we don't have explicit equip events.
+        local remoteAnim = state.Anim or ""
+        local inferredWeapon = Animations.GuessWeapon(remoteAnim)
+        if inferredWeapon ~= "NoWeapon" then
+            Puppet.CurrentWeapon = inferredWeapon
+        end
+
+        local currentAnimSet = Animations.Data[Puppet.CurrentWeapon] or Animations.Data.NoWeapon
+
+        -- 2. Check if the player is doing an Action (Attack, Cast, Hit React)
+        --    If so, we bypass the velocity logic and just play the animation.
+        if not Animations.IsLocomotion(remoteAnim) and remoteAnim ~= "" and remoteAnim ~= "Idle" then
+            
+            -- Only set if it changed, to avoid restarting the animation every frame
+            if Puppet.LastSyncedAnim ~= remoteAnim then
+                pcall(SetAnimation, { Name = remoteAnim, DestinationId = Puppet.Id })
+                Puppet.LastSyncedAnim = remoteAnim
+                
+                -- We DO NOT set IsMoving = false here anymore.
+                -- This allows us to resume running smoothly if we attacked while moving.
+            end
+
+            -- Still update Position/Angle for sliding attacks or dashes
+            local angle = state.Angle or 0
+            if SetAngle then SetAngle({ Id = Puppet.Id, Angle = angle }) end
+            
+            local vx, vy = state.Vel.X, state.Vel.Y
+            local speed = math.sqrt(vx*vx + vy*vy)
+            if Move and speed > 10 then
+                 Move({ Id = Puppet.Id, Angle = angle, Speed = speed, Duration = 0.1 })
+            end
+
+            return -- Exit early, don't run locomotion logic
+        end
+
+        -- 3. Locomotion Logic (Smoothing)
+        --    If we are here, the remote player is Idle, Running, Sprinting, or Walking.
+        
         local vx, vy = state.Vel.X, state.Vel.Y
         local speed = math.sqrt(vx*vx + vy*vy)
         local angle = state.Angle or 0
-        
+        local currentTime = GetTime()
+
         -- Helper: Calculate difference between two angles (-180 to 180)
         local function GetAngleDiff(a1, a2)
             local diff = a1 - a2
             return (diff + 180) % 360 - 180
         end
 
-        -- [[ STATE MACHINE ]]
         if speed > 20 then
-            -- Determine Gait based on speed
-            -- Native Speeds: Walk (~120), Run (540), Sprint (740)
+            -- Determine Gait
             local targetGait = "Run"
-            local animSet = Animations.Locomotion.Run -- Default
+            local animData = currentAnimSet.Run -- Default to Run
 
             if speed < 250 then 
                 targetGait = "Walk"
-                animSet = Animations.Locomotion.Walk
+                animData = Animations.Data.NoWeapon.Run 
             elseif speed > 600 then 
                 targetGait = "Sprint"
-                animSet = Animations.Locomotion.Sprint
+                animData = currentAnimSet.Sprint or currentAnimSet.Run
             end
 
             local angleDiff = GetAngleDiff(angle, Puppet.CurrentFacing)
-            local currentTime = GetTime()
             
             -- Handling Gait Changes and Starts
             if not Puppet.IsMoving then
-                -- EVENT: START (From Idle)
-                pcall(SetAnimation, { Name = animSet.Start, DestinationId = Puppet.Id })
+                -- START from stop
+                -- If we are already moving fast (e.g. resumed from an attack), skip the Start anim
+                if speed > 150 then
+                    pcall(SetAnimation, { Name = animData.Loop, DestinationId = Puppet.Id })
+                else
+                    pcall(SetAnimation, { Name = animData.Start or animData.Loop, DestinationId = Puppet.Id })
+                end
+                
                 Puppet.IsMoving = true
                 Puppet.CurrentGait = targetGait
+                Puppet.LastSyncedAnim = animData.Loop -- Approximate
 
             elseif Puppet.CurrentGait ~= targetGait then
-                -- EVENT: GAIT CHANGE (While Moving, e.g. Run -> Sprint)
-                pcall(SetAnimation, { Name = animSet.Loop, DestinationId = Puppet.Id })
+                -- CHANGE GAIT
+                pcall(SetAnimation, { Name = animData.Loop, DestinationId = Puppet.Id })
                 Puppet.CurrentGait = targetGait
+                Puppet.LastSyncedAnim = animData.Loop
+
+            elseif Puppet.LastSyncedAnim ~= animData.Loop and Puppet.LastSyncedAnim ~= animData.Start and not string.find(Puppet.LastSyncedAnim or "", "Turn") then
+                -- RESUME LOOP: We are moving, gait matches, but animation is wrong (e.g. finished attacking)
+                pcall(SetAnimation, { Name = animData.Loop, DestinationId = Puppet.Id })
+                Puppet.LastSyncedAnim = animData.Loop
                 
-            -- PIVOT LOGIC (Mostly for Running)
-            -- Only Run has pivot animations defined in our table currently
-            elseif targetGait == "Run" and math.abs(angleDiff) > 150 and (currentTime - Puppet.LastPivotTime > 0.5) then
-                -- EVENT: PIVOT 180
-                pcall(SetAnimation, { Name = Animations.Locomotion.Run.Pivot.Turn180, DestinationId = Puppet.Id })
+            -- PIVOT LOGIC
+            elseif targetGait == "Run" and math.abs(angleDiff) > 150 and (currentTime - Puppet.LastPivotTime > 0.5) and animData.Pivot180 then
+                pcall(SetAnimation, { Name = animData.Pivot180, DestinationId = Puppet.Id })
+                Puppet.LastSyncedAnim = animData.Pivot180
                 Puppet.LastPivotTime = currentTime
                 
             elseif targetGait == "Run" and math.abs(angleDiff) > 80 and (currentTime - Puppet.LastPivotTime > 0.5) then
-                -- EVENT: PIVOT 90 (Left/Right)
-                if angleDiff > 0 then
-                    pcall(SetAnimation, { Name = Animations.Locomotion.Run.Pivot.TurnRight90, DestinationId = Puppet.Id })
-                else
-                    pcall(SetAnimation, { Name = Animations.Locomotion.Run.Pivot.TurnLeft90, DestinationId = Puppet.Id })
+                if angleDiff > 0 and animData.PivotRight then
+                    pcall(SetAnimation, { Name = animData.PivotRight, DestinationId = Puppet.Id })
+                    Puppet.LastSyncedAnim = animData.PivotRight
+                elseif animData.PivotLeft then
+                    pcall(SetAnimation, { Name = animData.PivotLeft, DestinationId = Puppet.Id })
+                    Puppet.LastSyncedAnim = animData.PivotLeft
                 end
                 Puppet.LastPivotTime = currentTime
             end
             
-            -- Always update facing and physics
+            -- Physics Update
             Puppet.CurrentFacing = angle
             Puppet.StopTimer = 0
 
             if Move then
-                Move({ 
-                    Id = Puppet.Id, 
-                    Angle = angle, 
-                    Speed = speed, 
-                    EaseIn = 0, 
-                    EaseOut = 0, 
-                    Duration = 0.1 
-                })
+                Move({ Id = Puppet.Id, Angle = angle, Speed = speed, Duration = 0.1 })
             end
             
             if SetAngle then
@@ -138,39 +213,47 @@ return function(game, modutil)
 
         else
             -- STATE: STOPPED
-            
-            if Puppet.IsMoving then
-                -- EVENT: STOP
-                local stopAnim = Animations.Locomotion.Run.Stop -- Default fallback
-                
-                if Puppet.CurrentGait == "Walk" then
-                    stopAnim = Animations.Locomotion.Walk.Stop
-                elseif Puppet.CurrentGait == "Sprint" then
-                     -- Often falls back to Run stop if SprintStop doesn't exist, but we have it defined
-                    stopAnim = Animations.Locomotion.Sprint.Stop or Animations.Locomotion.Run.Stop
-                end
+            local stopAnim = currentAnimSet.Run.Stop 
+            if Puppet.CurrentGait == "Sprint" and currentAnimSet.Sprint then
+                stopAnim = currentAnimSet.Sprint.Stop or stopAnim
+            end
 
+            if Puppet.IsMoving then
+                -- Just stopped moving
                 pcall(SetAnimation, { Name = stopAnim, DestinationId = Puppet.Id })
                 
                 Puppet.IsMoving = false
                 Puppet.CurrentGait = "Idle"
                 Puppet.StopTimer = 0.3
+                Puppet.LastSyncedAnim = stopAnim
+            else
+                -- ALREADY STOPPED: Check if we need to return to Idle (e.g. after Attack finished)
+                local idleAnim = currentAnimSet.Idle
+                if Puppet.StopTimer <= 0 and Puppet.LastSyncedAnim ~= idleAnim then
+                     pcall(SetAnimation, { Name = idleAnim, DestinationId = Puppet.Id })
+                     Puppet.LastSyncedAnim = idleAnim
+                end
             end
             
-            -- Handle Return to Idle
+            -- Return to Idle after stop anim finishes
             if Puppet.StopTimer > 0 then
                 Puppet.StopTimer = Puppet.StopTimer - 0.03
                 if Puppet.StopTimer <= 0 then
-                    pcall(SetAnimation, { Name = Animations.Idle, DestinationId = Puppet.Id })
+                    pcall(SetAnimation, { Name = currentAnimSet.Idle, DestinationId = Puppet.Id })
+                    Puppet.LastSyncedAnim = currentAnimSet.Idle
                 end
             end
 
-            -- Kill physics velocity
-            if Stop then
-                Stop({ Id = Puppet.Id })
-            elseif Move then
-                Move({ Id = Puppet.Id, Speed = 0, Angle = angle, Duration = 0.1 })
-            end
+            -- Kill velocity
+            if Stop then Stop({ Id = Puppet.Id }) end
+        end
+    end
+
+    -- Allow manual triggers from hooks if needed
+    function Puppet.Mimic(animName)
+        if Puppet.Id then
+            pcall(game.SetAnimation, { Name = animName, DestinationId = Puppet.Id })
+            Puppet.LastSyncedAnim = animName
         end
     end
 
