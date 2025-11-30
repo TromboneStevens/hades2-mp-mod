@@ -35,6 +35,7 @@ modutil.mod.Path.Wrap("SetupMap", function(base, ...)
 
         if game.CurrentRun and game.CurrentRun.Hero then
             Puppet.Create(game.CurrentRun.Hero)
+            print("[Hades2MP] Puppet Connected and Ready.")
         else
             print("[Hades2MP] Hero not found, skipping Puppet spawn.")
         end
@@ -46,13 +47,14 @@ modutil.mod.Path.Wrap("SetupMap", function(base, ...)
             if game and PlayerTracker then
                 local state = PlayerTracker.GetState()
                 if state then
-                    -- Send position packet (example)
-                    local packet = string.format("POS:%.2f:%.2f", state.Loc.X, state.Loc.Y)
-                    -- NetworkManager.SendString(packet)
+                    -- [[ LOCAL MIRRORING ]]
+                    -- Feed local player state to the puppet
+                    Puppet.Sync(state)
                 end
             end
 
-            wait(0.1) 
+            -- Update roughly 30 times a second
+            wait(0.03) 
         end
     end)
 end)
