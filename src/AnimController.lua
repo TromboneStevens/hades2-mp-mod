@@ -15,8 +15,9 @@ return function(game)
         self.LastAnim = ""
         self.CurrentWeapon = "NoWeapon"
         self.IsMoving = false
+        self.HasInitialized = false
         
-        -- New: Track the angle we were facing BEFORE the pivot started
+        -- Track the angle we were facing BEFORE the pivot started
         self.PivotStartAngle = 0
         
         return self
@@ -30,10 +31,18 @@ return function(game)
     function Controller:Update(remoteState, currentTime)
         if not remoteState or not remoteState.Vel then return nil end
         
+        -- [[ INIT ]]
+        if not self.HasInitialized then
+            self.CurrentFacing = remoteState.Angle or 0
+            self.HasInitialized = true
+        end
+
+        -- Time delta calculation
         local dt = 0
         if self.LastTime > 0 then dt = currentTime - self.LastTime end
         self.LastTime = currentTime
         
+        -- Decrement Pivot Timer
         if self.PivotTimer > 0 then
             self.PivotTimer = self.PivotTimer - dt
         else
@@ -46,11 +55,12 @@ return function(game)
         local animSet = Registry.GetSet(self.CurrentWeapon)
         local remoteAnim = remoteState.Anim or "Idle"
 
-        -- 2. Non-Locomotion Override
+        -- 2. Non-Locomotion Override (Attacks, Emotes, etc.)
         if not Registry.IsLocomotion(remoteAnim) and remoteAnim ~= "Idle" then
             self.LastAnim = remoteAnim
             self.PivotTimer = 0 
             self.CurrentPivotAnim = nil
+            self.CurrentFacing = remoteState.Angle 
             return { 
                 Anim = remoteAnim, 
                 Angle = remoteState.Angle, 
@@ -59,97 +69,105 @@ return function(game)
             }
         end
 
-        -- 3. Locomotion Logic
+        -- 3. Calculate Target State
         local vx, vy = remoteState.Vel.X, remoteState.Vel.Y
         local speed = math.sqrt(vx*vx + vy*vy)
         local targetAngle = remoteState.Angle or 0
+
+        -- Variables to determine next frame's output
+        local nextAnim = nil
+        local nextAngle = targetAngle
+        local nextSpeed = speed
+
+        -- [[ STATE MACHINE ]]
         
-        -- [[ PIVOT LOCK ]]
-        -- If locked, we MUST return the OLD angle (PivotStartAngle).
-        -- If we send 'targetAngle' (the new direction), the model snaps instantly,
-        -- defeating the purpose of the turn animation.
         if self.PivotTimer > 0 and self.CurrentPivotAnim then
-            return {
-                Anim = self.CurrentPivotAnim,
-                Angle = self.PivotStartAngle, -- Keep facing the OLD way while turning
-                Speed = 0 -- Usually pivots happen in place or with root motion
-            }
-        end
-
-        local command = { Angle = targetAngle, Speed = speed }
-
-        -- 4. Movement Logic (Simplified)
-        if speed > 10 then 
+            -- STATE: LOCKED PIVOT
+            -- While turning, we must send the pivot anim and lock the angle
+            nextAnim = self.CurrentPivotAnim
+            nextAngle = self.PivotStartAngle
+            nextSpeed = 0
             
-            -- Default: Run Loop
-            local animToPlay = animSet.Run.Loop
+            -- We consider ourselves "moving" during a pivot, so we don't trigger "Stop" immediately after
+            self.IsMoving = true 
+        else
+            -- STATE: NORMAL LOCOMOTION
+            if speed > 10 then 
+                local animToPlay = animSet.Run.Loop
 
-            -- Override if remote is sending a specific locomotion anim
-            if Registry.IsLocomotion(remoteAnim) and remoteAnim ~= "Idle" then
-                animToPlay = remoteAnim
-            end
+                -- Filter Remote Animations to prevent "Double Turns"
+                if Registry.IsLocomotion(remoteAnim) and remoteAnim ~= "Idle" then
+                    local isTurn = string.find(remoteAnim, "Turn") or string.find(remoteAnim, "Pivot") or string.find(remoteAnim, "DirectionChange")
+                    if not isTurn then
+                        animToPlay = remoteAnim
+                    end
+                end
 
-            -- [[ PIVOT DETECTION ]]
-            local angleDiff = GetAngleDiff(targetAngle, self.CurrentFacing)
-            
-            -- 180 Turn
-            if math.abs(angleDiff) > 150 and (currentTime - self.LastPivotTime > 0.5) then
-                if animSet.Run.Pivot180 then
-                    self.CurrentPivotAnim = animSet.Run.Pivot180
+                -- Detect NEW Pivot
+                local angleDiff = GetAngleDiff(targetAngle, self.CurrentFacing)
+                local pivotCooldown = 0.5
+                local triggeredPivot = nil
+                local pivotDuration = 0
+
+                if (currentTime - self.LastPivotTime > pivotCooldown) then
+                    if math.abs(angleDiff) > 150 and animSet.Run.Pivot180 then
+                        triggeredPivot = animSet.Run.Pivot180
+                        pivotDuration = 0.35
+                    elseif math.abs(angleDiff) > 80 then
+                        -- [[ LOGIC RESTORATION ]]
+                        -- Standard Coordinate System:
+                        -- Angle increases Counter-Clockwise (CCW).
+                        -- Positive Diff (e.g., 0 -> 90) = Turning Left.
+                        -- Negative Diff (e.g., 0 -> -90) = Turning Right.
+                        
+                        if angleDiff > 0 then 
+                            triggeredPivot = animSet.Run.PivotLeft -- Positive = Left
+                        else 
+                            triggeredPivot = animSet.Run.PivotRight -- Negative = Right
+                        end
+                        pivotDuration = 0.25
+                    end
+                end
+
+                if triggeredPivot then
+                    -- Trigger Pivot Start
+                    self.CurrentPivotAnim = triggeredPivot
                     self.LastPivotTime = currentTime
-                    self.PivotTimer = 0.35
-                    self.PivotStartAngle = self.CurrentFacing -- Capture current angle
+                    self.PivotTimer = pivotDuration
+                    self.PivotStartAngle = self.CurrentFacing
                     
-                    -- Immediately return the pivot command to ensure it starts NOW
-                    return {
-                        Anim = self.CurrentPivotAnim,
-                        Angle = self.PivotStartAngle,
-                        Speed = 0
-                    }
-                end
-                
-            -- 90 Turn
-            elseif math.abs(angleDiff) > 80 and (currentTime - self.LastPivotTime > 0.5) then
-                local turnAnim = nil
-                if angleDiff > 0 then
-                    turnAnim = animSet.Run.PivotLeft
+                    nextAnim = triggeredPivot
+                    nextAngle = self.PivotStartAngle
+                    nextSpeed = 0
                 else
-                    turnAnim = animSet.Run.PivotRight
+                    -- Standard Run
+                    self.IsMoving = true
+                    nextAnim = animToPlay
+                    self.CurrentFacing = targetAngle -- Update facing to match target
+                end
+
+            else
+                -- STATE: STOPPED
+                if self.IsMoving then
+                    nextAnim = animSet.Run.Stop
+                    self.IsMoving = false
+                else
+                    nextAnim = animSet.Idle
                 end
                 
-                if turnAnim then
-                    self.CurrentPivotAnim = turnAnim
-                    self.LastPivotTime = currentTime
-                    self.PivotTimer = 0.25
-                    self.PivotStartAngle = self.CurrentFacing -- Capture current angle
-
-                    return {
-                        Anim = self.CurrentPivotAnim,
-                        Angle = self.PivotStartAngle,
-                        Speed = 0
-                    }
-                end
+                nextSpeed = 0
+                self.CurrentFacing = targetAngle 
             end
-
-            self.IsMoving = true
-            command.Anim = animToPlay
-            self.CurrentFacing = targetAngle
-
-        else
-            -- STOPPED
-            if self.IsMoving then
-                command.Anim = animSet.Run.Stop
-                self.IsMoving = false
-            else
-                command.Anim = animSet.Idle
-            end
-            command.Speed = 0
         end
 
-        if command.Anim == self.LastAnim and not command.ForcePlay then
-            command.Anim = nil 
+        -- 4. Finalize Command & Deduplicate
+        local command = { Angle = nextAngle, Speed = nextSpeed }
+
+        if nextAnim == self.LastAnim then
+            command.Anim = nil -- Don't resend the same animation (Fixes Flicker)
         else
-            self.LastAnim = command.Anim
+            command.Anim = nextAnim
+            self.LastAnim = nextAnim
         end
 
         return command

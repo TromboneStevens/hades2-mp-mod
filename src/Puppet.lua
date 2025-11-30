@@ -32,17 +32,25 @@ return function(game, modutil)
     function Puppet.Sync(state)
         if not Puppet.Id or not Puppet.Controller then return end
         
-        -- [[ CHANGE: Changed '.' to ':' to pass the controller instance ]]
+        -- Update the controller to calculate the desired animation and physics state
         local cmd = Puppet.Controller:Update(state, _G.GetTime())
         if not cmd then return end
 
+        -- 1. Apply Animation
         if cmd.Anim then
             pcall(game.SetAnimation, { Name = cmd.Anim, DestinationId = Puppet.Id })
         end
 
+        -- 2. Apply Movement & Rotation
+        -- CRITICAL FIX: We must apply SetAngle even if Speed is 0.
+        -- Pivot animations require the model to face the 'Old' direction while playing the 'Turn' animation.
+        -- If we don't enforce this, the game engine might snap the rotation to the new input vector immediately,
+        -- causing the turn animation to play in the wrong direction (jittering).
+        
+        game.SetAngle({ Id = Puppet.Id, Angle = cmd.Angle })
+
         if cmd.Speed > 0 then
             game.Move({ Id = Puppet.Id, Angle = cmd.Angle, Speed = cmd.Speed, Duration = 0.1 })
-            game.SetAngle({ Id = Puppet.Id, Angle = cmd.Angle })
         else
             game.Stop({ Id = Puppet.Id })
         end
