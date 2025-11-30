@@ -110,22 +110,30 @@ return function(game)
                 local pivotDuration = 0
 
                 if (currentTime - self.LastPivotTime > pivotCooldown) then
-                    if math.abs(angleDiff) > 150 and animSet.Run.Pivot180 then
+                    -- [[ THRESHOLD ADJUSTMENT ]]
+                    -- Previous: > 150. New: > 130.
+                    -- This ensures 135-degree turns (Cardinal <-> Diagonal) are treated as 180s.
+                    if math.abs(angleDiff) > 130 and animSet.Run.Pivot180 then
+                        
                         triggeredPivot = animSet.Run.Pivot180
                         pivotDuration = 0.35
-                    elseif math.abs(angleDiff) > 80 then
-                        -- [[ LOGIC RESTORATION ]]
-                        -- Standard Coordinate System:
-                        -- Angle increases Counter-Clockwise (CCW).
-                        -- Positive Diff (e.g., 0 -> 90) = Turning Left.
-                        -- Negative Diff (e.g., 0 -> -90) = Turning Right.
+                        
+                        -- For 180/135 turns, snap to TARGET to avoid "Reverse" look at the end
+                        self.PivotStartAngle = targetAngle
+
+                    elseif math.abs(angleDiff) > 60 then
+                        -- [[ 90 TURN LOGIC ]]
+                        -- Previous: > 80. New: > 60 to catch standard 90s reliably.
                         
                         if angleDiff > 0 then 
-                            triggeredPivot = animSet.Run.PivotLeft -- Positive = Left
+                            triggeredPivot = animSet.Run.PivotRight -- Positive = Left Turn -> W90
                         else 
-                            triggeredPivot = animSet.Run.PivotRight -- Negative = Right
+                            triggeredPivot = animSet.Run.PivotLeft -- Negative = Right Turn -> E90
                         end
                         pivotDuration = 0.25
+                        
+                        -- For 90 turns, lock to START so we turn "into" the new direction
+                        self.PivotStartAngle = self.CurrentFacing
                     end
                 end
 
@@ -134,7 +142,6 @@ return function(game)
                     self.CurrentPivotAnim = triggeredPivot
                     self.LastPivotTime = currentTime
                     self.PivotTimer = pivotDuration
-                    self.PivotStartAngle = self.CurrentFacing
                     
                     nextAnim = triggeredPivot
                     nextAngle = self.PivotStartAngle
